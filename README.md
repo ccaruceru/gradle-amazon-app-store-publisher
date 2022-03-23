@@ -25,12 +25,13 @@ upload. If you'd like to contribute more behaviours then...
         securityProfile = file("<path-to-security-profile.json>")
         applicationId = "<applicationId>"
         pathToApks = [ file("<path-to-apk>") ]
-        replaceEdit = true // true if you want to delete any existing Edit ("Upcoming version")
-        replaceApks = true // true if you want to replace existing apks in an Edit ("Upcoming version")
+        replaceEdit = true // true if you want to delete any existing Edit ("Upcoming version"). Default true
+        replaceApks = false // true if you want to replace existing apks in an Edit ("Upcoming version"). Default false
+        deleteApks = true // true if you want to delete any existing apks in an Edit ("Upcoming version"). Default true
     }
     ```
-    All paths are relative.
-    
+    - All paths are relative.
+    - If `replaceApks` is true, then `deleteApks` has no effect.
 5. Run `gradlew publishToAmazonAppStore`
     - For large files or slow networks, you might need to increase the read and write timeouts in seconds by setting `app.brant.amazonappstorepublisher.PublishPlugin.writeTimeout` or `app.brant.amazonappstorepublisher.PublishPlugin.readTimeout` jvm properties
         - e.g.

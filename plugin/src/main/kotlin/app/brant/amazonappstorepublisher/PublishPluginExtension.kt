@@ -20,6 +20,9 @@ open class PublishPluginExtension @JvmOverloads constructor(
     internal var replaceApksProp: Boolean? = null
 
     @get:Internal("Backing property for public input")
+    internal var deleteApksProp: Boolean? = null
+
+    @get:Internal("Backing property for public input")
     internal var applicationIdProp: String? = null
 
     @get:Internal("Backing property for public input")
@@ -60,5 +63,12 @@ open class PublishPluginExtension @JvmOverloads constructor(
         get() = replaceApksProp ?: false
         set(value) {
             replaceApksProp = value
+        }
+
+    @get:Input
+    var deleteApks
+        get() = deleteApksProp ?: true
+        set(value) {
+            deleteApksProp = value
         }
 }

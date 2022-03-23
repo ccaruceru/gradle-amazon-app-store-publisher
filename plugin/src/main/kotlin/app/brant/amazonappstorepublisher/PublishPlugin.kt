@@ -1,6 +1,8 @@
 package app.brant.amazonappstorepublisher
 
+import app.brant.amazonappstorepublisher.apks.Apk
 import app.brant.amazonappstorepublisher.apks.ApkService
+import app.brant.amazonappstorepublisher.apks.ApkTargeting
 import app.brant.amazonappstorepublisher.edits.Edit
 import app.brant.amazonappstorepublisher.edits.EditsService
 import app.brant.amazonappstorepublisher.fetchtoken.FetchTokenService
@@ -82,12 +84,17 @@ class PublishPlugin : Plugin<Project> {
                         replaceExistingApksOnEdit(apkService, newEdit!!, amazon.pathToApks)
                     }
                     else {
-                        deleteExistingApksOnEdit(apkService, newEdit!!)
-                        uploadApksAndAttachToEdit(
-                                apkService,
-                                newEdit,
-                                amazon.pathToApks
-                        )
+                        // PROD:
+                        // if (amazon.deleteApks) {
+                        //     deleteExistingApksOnEdit(apkService, newEdit!!)
+                        // }
+                        // uploadApksAndAttachToEdit(
+                        //         apkService,
+                        //         newEdit!!,
+                        //         amazon.pathToApks
+                        // )
+
+                        uploadNewAndDeleteOldApks(apkService, newEdit!!, amazon.pathToApks)
                     }
                 }
             }
@@ -135,25 +142,126 @@ class PublishPlugin : Plugin<Project> {
         val apks = apkService.getApks(activeEdit.id)
         println("⬅️ Remove APKs from previous edit...")
         apks.forEach {
-            val status = apkService.deleteApk(activeEdit.id, it.id)
-            if (!status) {
+            val isSuccess = apkService.deleteApk(activeEdit.id, it.id)
+            if (!isSuccess) {
                 throw IllegalStateException("❌ Failed to delete existing APK")
             }
         }
     }
 
+    // PROD:
+    // private fun uploadApksAndAttachToEdit(
+    //         apkService: ApkService,
+    //         activeEdit: Edit,
+    //         apksToUpload: List<File>) {
+    //     apksToUpload.forEach { apk ->
+    //         println("⏫ Uploading new APK(s)...")
+    //         val result = apkService.uploadApk(activeEdit.id, apk, apk.getName())
+    //         if (result) {
+    //             println("\uD83C\uDF89 New APK(s) published to the Amazon App Store...")
+    //         } else {
+    //             throw IllegalStateException("Failed to upload new APK(s)...")
+    //         }
+    //     }
+    // }
+
     private fun uploadApksAndAttachToEdit(
             apkService: ApkService,
             activeEdit: Edit,
+            apksToUpload: List<File>): List<Apk> {
+        println("⏫ Uploading new APK(s)...")
+
+        val apks = apksToUpload.map { apkFile ->
+            val apk = apkService.uploadApk(activeEdit.id, apkFile, apkFile.getName())
+            if (apk == null) {
+                throw IllegalStateException("❌ Failed to upload new APK(s)")
+            }
+            apk
+        }
+
+        println("\uD83C\uDF89 New APK(s) published to the Amazon App Store...")
+        return apks
+    }
+
+    private fun uploadNewAndDeleteOldApks(
+            apkService: ApkService,
+            activeEdit: Edit,
             apksToUpload: List<File>) {
-        apksToUpload.forEachIndexed { index, apk ->
-            println("⏫ Uploading new APK(s)...")
-            val result = apkService.uploadApk(activeEdit.id, apk, "APK-$index")
-            if (result) {
-                println("\uD83C\uDF89 New APK(s) published to the Amazon App Store...")
-            } else {
-                println("❌ Failed to upload new APK(s)...")
-                throw IllegalStateException("Failed to upload new APK(s)...")
+        val oldApks = apkService.getApks(activeEdit.id)
+        if (oldApks.size != apksToUpload.size) {
+            throw IllegalStateException("❌ Number of existing APKs on edit (${oldApks.size}) does not match" +
+                "the number of APKs to upload (${apksToUpload.size})")
+        }
+        val oldApksTargeting = mutableMapOf<String, ApkTargeting>()
+        // TODO: println status every big step
+
+        println("🔠 Getting targeting for old APK(s) in edit...")
+        // get old apks targeting
+        oldApks.forEach { apk ->
+            val apkTargeting = apkService.getApkTargeting(activeEdit.id, apk.id)
+            if (apkTargeting != null) {
+                oldApksTargeting[apk.id] = apkTargeting
+            }
+            else {
+                throw IllegalStateException("❌ Failed to get APK targeting")
+            }
+        }
+
+        // upload new apks
+        val newApks = uploadApksAndAttachToEdit(apkService, activeEdit, apksToUpload)
+
+        println("🚮 Removing targetings for old APK(s) in edit...")
+        // remove old apks targeting
+        oldApksTargeting.forEach { (apkId, apkTargeting) ->
+            // TODO: loop over all targetings, set status to NOT_TARGETING/DISABLED and add a Reason
+            val newApkTargeting = ApkTargeting(
+                apkTargeting.amazonDevices.map{ it.copy() },
+                apkTargeting.nonAmazonDevices.map{ it.copy() },
+                "NOT_TARGETING",
+                apkTargeting.eTag)
+            newApkTargeting.amazonDevices.forEach {
+                if (it.status == "TARGETING" ) {
+                    it.status = "NOT_TARGETING"
+                }
+            }
+            newApkTargeting.nonAmazonDevices.forEach {
+                if (it.status == "TARGETING" ) {
+                    it.status = "NOT_TARGETING"
+                }
+            }
+
+            val isSuccess = apkService.setApkTargeting(activeEdit.id, apkId, newApkTargeting)
+            if (!isSuccess) {
+                throw IllegalStateException("❌ Failed to delete targeting for old APK(s)")
+            }
+        }
+
+        println("🔠 Set targetings for new APK(s) in edit...")
+        // set new apks targeting
+        newApks.forEachIndexed { index, apk ->
+            // get targeting for uploaded apk to see the eTag
+            val existingApkTargeting = apkService.getApkTargeting(activeEdit.id, apk.id)
+            if (existingApkTargeting == null) {
+                throw IllegalStateException("❌ Failed to get targeting on new APK(s)")
+            }
+
+            // adjust the eTag on old targeting
+            val newApkTargeting = oldApksTargeting[oldApksTargeting.keys.elementAt(index)]!! // this is an ordered map
+            newApkTargeting.eTag = existingApkTargeting.eTag
+
+            // set old targeting for new apk
+            val isSuccess = apkService.setApkTargeting(activeEdit.id, apk.id, newApkTargeting)
+            if (!isSuccess) {
+                throw IllegalStateException("❌ Failed to set targeting on new APK(s)")
+            }
+        }
+
+        println("⬅️ Removing old APK(s) from previous edit...")
+        // delete old apks
+        oldApks.forEach { apk ->
+            val isSuccess = apkService.deleteApk(activeEdit.id, apk.id)
+            if (!isSuccess) {
+                throw IllegalStateException("❌ Failed to delete old APK(s)")
             }
         }
     }

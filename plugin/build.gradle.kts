@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "app.brant"
-version = "0.1.1"
+version = "0.1.2"
 
 val pluginArtifactId = "amazonappstorepublisher"
 val pluginVcsUrl = "https://github.com/BrantApps/gradle-amazon-app-store-publisher"
